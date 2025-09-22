@@ -1,0 +1,249 @@
+-- =====================================================
+-- Setup: Create table and sample data
+-- =====================================================
+DROP TABLE IF EXISTS StudentEnrollments;
+
+CREATE TABLE StudentEnrollments (
+    student_id INT PRIMARY KEY,
+    student_name VARCHAR(100),
+    course_id VARCHAR(10),
+    enrollment_date DATE
+) ENGINE=InnoDB;
+
+INSERT INTO StudentEnrollments VALUES
+(1, 'Ashish', 'CSE101', '2024-06-01'),
+(2, 'Smaran', 'CSE102', '2024-06-01'),
+(3, 'Vaibhav', 'CSE103', '2024-06-01');
+
+-- =====================================================
+-- PART A: Simulating a Deadlock
+-- =====================================================
+-- Run in TWO sessions (Session A & Session B)
+
+-- Session A
+START TRANSACTION;
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-07-01'
+WHERE student_id = 1;
+
+-- Session B
+START TRANSACTION;
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-07-05'
+WHERE student_id = 2;
+
+-- Now cause deadlock:
+-- Session A tries to update row 2
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-08-01'
+WHERE student_id = 2;
+
+-- Session B tries to update row 1
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-08-05'
+WHERE student_id = 1;
+
+-- 🔴 MySQL detects deadlock, aborts one transaction:
+-- ERROR 1213 (40001): Deadlock found when trying to get lock
+
+-- =====================================================
+-- PART B: MVCC Demonstration
+-- =====================================================
+-- Shows how one session sees a snapshot even while another updates.
+
+-- Session A
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+START TRANSACTION;
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- Output: enrollment_date = 2024-06-01
+
+-- Session B
+START TRANSACTION;
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-07-10'
+WHERE student_id = 1;
+COMMIT;
+
+-- Session A (still active transaction)
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- Still sees old value: 2024-06-01
+
+-- Session A after commit
+COMMIT;
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- Now sees new value: 2024-07-10
+
+-- =====================================================
+-- PART C: Comparing Locking vs MVCC
+-- =====================================================
+
+-- 1️⃣ Without MVCC (traditional locking using SELECT FOR UPDATE)
+-- Session A
+START TRANSACTION;
+SELECT * FROM StudentEnrollments WHERE student_id = 1 FOR UPDATE;
+-- Locks row
+
+-- Session B
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- ❌ Blocks until Session A commits
+
+-- 2️⃣ With MVCC (normal SELECT in REPEATABLE READ isolation)
+-- Session A
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+START TRANSACTION;
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- Sees current snapshot (2024-07-10)
+
+-- Session B
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-08-20'
+WHERE student_id = 1;
+COMMIT;
+
+-- Session A (still open TX)
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- ✅ Still sees old value (2024-07-10)
+
+-- Session A after commit
+COMMIT;
+SELECT * FROM StudentEnrollments WHERE student_id = 1;
+-- ✅ Sees updated value (2024-08-20)
+
+
+
+
+
+
+
+
+-- Drop old table if exists
+DROP TABLE IF EXISTS StudentEnrollments;
+
+-- Part A: Create table with UNIQUE constraint on (student_name, course_id)
+CREATE TABLE StudentEnrollments (
+    enrollment_id INT AUTO_INCREMENT PRIMARY KEY,
+    student_name VARCHAR(100) NOT NULL,
+    course_id VARCHAR(10) NOT NULL,
+    enrollment_date DATE NOT NULL,
+    UNIQUE(student_name, course_id)  -- Prevent duplicate enrollment
+);
+
+-- Insert some initial data
+INSERT INTO StudentEnrollments (student_name, course_id, enrollment_date) VALUES
+('Ashish', 'CSE101', '2024-07-01'),
+('Smaran', 'CSE102', '2024-07-01'),
+('Vaibhav', 'CSE103', '2024-07-01');
+
+-- ✅ Part A Demo: Successful inserts (no duplicates)
+START TRANSACTION;
+INSERT INTO StudentEnrollments (student_name, course_id, enrollment_date)
+VALUES ('Ashish', 'CSE104', '2024-07-10');   -- Ashish new course
+COMMIT;
+
+START TRANSACTION;
+INSERT INTO StudentEnrollments (student_name, course_id, enrollment_date)
+VALUES ('Smaran', 'CSE105', '2024-07-10');   -- Smaran new course
+COMMIT;
+
+-- ✅ Part B Demo: Row Locking with SELECT FOR UPDATE
+-- (Open in Session/User A)
+START TRANSACTION;
+SELECT * FROM StudentEnrollments
+WHERE student_name = 'Ashish' AND course_id = 'CSE101'
+FOR UPDATE;
+
+-- (While Session A is open, run Session/User B in another client/terminal)
+-- This query will WAIT until Session A commits or rolls back
+START TRANSACTION;
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-08-01'
+WHERE student_name = 'Ashish' AND course_id = 'CSE101';
+COMMIT;
+
+-- ✅ Part C Demo: Consistency with locking
+-- User A
+START TRANSACTION;
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-09-01'
+WHERE student_name = 'Vaibhav' AND course_id = 'CSE103';
+COMMIT;
+
+-- User B (runs after User A finishes)
+START TRANSACTION;
+UPDATE StudentEnrollments
+SET enrollment_date = '2024-09-15'
+WHERE student_name = 'Vaibhav' AND course_id = 'CSE103';
+COMMIT;
+
+-- Final check
+SELECT * FROM StudentEnrollments;
+
+
+
+
+
+DROP TABLE IF EXISTS StudentEnrollments;
+
+CREATE TABLE StudentEnrollments (
+    student_id INT PRIMARY KEY,
+    student_name VARCHAR(100),
+    course_id VARCHAR(10),
+    enrollment_date DATE
+);
+
+INSERT INTO StudentEnrollments VALUES
+(1, 'Ashish', 'CSE101', '2024-06-01'),
+(2, 'Smaran', 'CSE102', '2024-06-01'),
+(3, 'Vaibhav', 'CSE103', '2024-06-01');
+
+-- PART A: Simulate Deadlock Between Two Transactions
+-- Session 1
+START TRANSACTION;
+UPDATE StudentEnrollments SET course_id='CSE201' WHERE student_id=1;
+-- Do not commit yet in Session 1
+
+-- Session 2 (in another session)
+START TRANSACTION;
+UPDATE StudentEnrollments SET course_id='CSE202' WHERE student_id=2;
+UPDATE StudentEnrollments SET course_id='CSE203' WHERE student_id=1;
+-- Deadlock will occur; MySQL automatically aborts one transaction
+
+-- PART B: MVCC - Non-blocking Reads and Writes
+-- Set isolation level in MySQL
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+
+-- Session A (Reader)
+START TRANSACTION;
+SELECT * FROM StudentEnrollments WHERE student_id=1;
+
+-- Session B (Writer)
+START TRANSACTION;
+UPDATE StudentEnrollments SET enrollment_date='2024-07-10' WHERE student_id=1;
+COMMIT;
+
+-- Back to Session A
+SELECT * FROM StudentEnrollments WHERE student_id=1;
+COMMIT;
+
+-- PART C: Comparing Behavior With and Without MVCC
+-- Traditional Locking (Blocking)
+START TRANSACTION;
+UPDATE StudentEnrollments SET enrollment_date='2024-08-01' WHERE student_id=1;
+-- Do not commit yet in Session 1
+
+-- Session 2 (Reader)
+SELECT * FROM StudentEnrollments WHERE student_id=1 FOR UPDATE;
+-- Session 2 will block until Session 1 commits
+
+-- MVCC Behavior (Non-blocking)
+START TRANSACTION;
+UPDATE StudentEnrollments SET enrollment_date='2024-09-01' WHERE student_id=1;
+
+-- Session 2 (Reader)
+SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+START TRANSACTION;
+SELECT * FROM StudentEnrollments WHERE student_id=1;
+COMMIT;
+
+COMMIT; -- Writer commits
+
